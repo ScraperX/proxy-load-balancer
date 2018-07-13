@@ -59,10 +59,10 @@ class Proxy:
 
     def set_defaults(self):
         self._closed = True
-        self._stats = {'total_time': 0,
-                       'bandwidth': {'up': 0, 'down': 0},
-                       'status_code': None,
-                       }
+        self.stats = {'total_time': 0,
+                      'bandwidth': {'up': 0, 'down': 0},
+                      'status_code': None,
+                      }
         self._reader = {'conn': None, 'ssl': None}
         self._writer = {'conn': None, 'ssl': None}
 
@@ -105,7 +105,7 @@ class Proxy:
 
         # Get runtime in ms
         runtime = int(time.time()*1000 - stime*1000) if stime else 0
-        self._stats['total_time'] += runtime
+        self.stats['total_time'] += runtime
         log_using(f"{self.host}:{self.port} - {msg.strip()} Runtime: {runtime}ms")
 
     async def connect(self, ssl=False):
@@ -143,7 +143,7 @@ class Proxy:
     def close(self):
         # TODO: Log all the data about the request here
         # time (ms), bytes (up/down), status code, domain
-        self.log(f'Connection: closed {self._stats}')
+        self.log(f'Connection: closed {self.stats}')
 
         if self._closed:
             self.set_defaults()
@@ -166,7 +166,7 @@ class Proxy:
         _req = req.encode() if not isinstance(req, bytes) else req
 
         try:
-            self._stats['bandwidth']['up'] = len(_req)
+            self.stats['bandwidth']['up'] += len(_req)
             self.writer.write(_req)
             await self.writer.drain()
         except ConnectionResetError:
@@ -175,56 +175,3 @@ class Proxy:
             raise err
         finally:
             self.log('Request: %s%s' % (req, msg))
-
-    async def recv(self, length=0, head_only=False):
-        resp, msg, err = b'', '', None
-        stime = time.time()
-        try:
-            resp = await asyncio.wait_for(
-                self._recv(length, head_only), timeout=self._timeout)
-        except asyncio.TimeoutError:
-            msg = 'Received: timeout'
-            err = ProxyTimeoutError(msg)
-            raise err
-        except (ConnectionResetError, OSError) as e:
-            msg = 'Received: failed'  # (connection is reset by the peer)
-            err = ProxyRecvError(msg)
-            raise err
-        else:
-            msg = 'Received: %s bytes' % len(resp)
-            if not resp:
-                err = ProxyEmptyRecvError(msg)
-                raise err
-        finally:
-            if resp:
-                msg += ': %s' % resp[:12]
-            self.log(msg, stime)
-
-        return resp
-
-    async def _recv(self, length=0, head_only=False):
-        resp = b''
-        if length:
-            try:
-                resp = await self.reader.readexactly(length)
-            except asyncio.IncompleteReadError as e:
-                resp = e.partial
-        else:
-            body_size, body_recv, chunked = 0, 0, None
-            while not self.reader.at_eof():
-                line = await self.reader.readline()
-                resp += line
-                if body_size:
-                    body_recv += len(line)
-                    if body_recv >= body_size:
-                        break
-                elif chunked and line == b'0\r\n':
-                    break
-                elif not body_size and line == b'\r\n':
-                    if head_only:
-                        break
-                    headers = parse_headers(resp)
-                    body_size = int(headers.get('Content-Length', 0))
-                    if not body_size:
-                        chunked = headers.get('Transfer-Encoding') == 'chunked'
-        return resp

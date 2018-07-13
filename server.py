@@ -129,8 +129,6 @@ class Server:
                     asyncio.ensure_future(self._stream(
                         reader=proxy.reader, writer=client_writer,
                         scheme=scheme))]
-                # print(proxy.reader.get_extra_info('socket'))
-                print(proxy.writer.get_extra_info('socket'))
                 await asyncio.gather(*stream, loop=self._loop)
             except asyncio.CancelledError:
                 logger.debug('Cancelled in server._handle')
@@ -156,6 +154,8 @@ class Server:
             else:
                 break
             finally:
+                proxy.stats['bandwidth']['up'] += stream[0].result()
+                proxy.stats['bandwidth']['down'] += stream[1].result()
                 proxy.log(request.decode(), stime)
                 proxy.close()
 
@@ -188,6 +188,7 @@ class Server:
 
     async def _stream(self, reader, writer, length=65536, scheme=None):
         checked = False
+        total_size = 0
         try:
             while not reader.at_eof():
                 data = await asyncio.wait_for(
@@ -199,10 +200,13 @@ class Server:
                     self._check_response(data, scheme)
                     checked = True
                 writer.write(data)
+                total_size += len(data)
                 await writer.drain()
         except (asyncio.TimeoutError, ConnectionResetError, OSError,
                 ProxyRecvError, BadStatusError, BadResponseError) as e:
             raise ErrorOnStream(e)
+
+        return total_size
 
     def _check_response(self, data, scheme):
         if scheme == 'HTTP' and self._http_allowed_codes:
