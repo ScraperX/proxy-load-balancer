@@ -136,10 +136,10 @@ class Server:
             except (ProxyTimeoutError, ProxyConnError, ProxyRecvError,
                     ProxySendError, ProxyEmptyRecvError, BadStatusError,
                     BadResponseError) as e:
-                logger.debug(f'client: {client}; error: {e}' % (client, e))
+                logger.exception(f'client: {client}')
                 continue
             except ErrorOnStream as e:
-                logger.debug(f'client: {client}; error: {e}; EOF: {client_reader.at_eof()}')
+                logger.exception(f'client: {client}; EOF: {client_reader.at_eof()}')
                 for task in stream:
                     if not task.done():
                         task.cancel()
@@ -154,9 +154,16 @@ class Server:
             else:
                 break
             finally:
-                proxy.stats['bandwidth']['up'] += stream[0].result()
-                proxy.stats['bandwidth']['down'] += stream[1].result()
                 proxy.log(request.decode(), stime)
+                # At this point, the client has already disconnected and now the stats can be processed and saved
+                try:
+                    # Make sure stream exist, if it does lets get some info from it
+                    stream
+                except NameError:
+                    pass
+                else:
+                    proxy.stats['bandwidth']['up'] += len(stream[0].result())
+                    proxy.stats['bandwidth']['down'] += len(stream[1].result())
                 proxy.close()
 
     async def _parse_request(self, reader, length=65536):
@@ -188,7 +195,7 @@ class Server:
 
     async def _stream(self, reader, writer, length=65536, scheme=None):
         checked = False
-        total_size = 0
+        total_data = b''
         try:
             while not reader.at_eof():
                 data = await asyncio.wait_for(
@@ -200,13 +207,13 @@ class Server:
                     self._check_response(data, scheme)
                     checked = True
                 writer.write(data)
-                total_size += len(data)
+                total_data += data
                 await writer.drain()
         except (asyncio.TimeoutError, ConnectionResetError, OSError,
                 ProxyRecvError, BadStatusError, BadResponseError) as e:
             raise ErrorOnStream(e)
 
-        return total_size
+        return total_data
 
     def _check_response(self, data, scheme):
         if scheme == 'HTTP' and self._http_allowed_codes:
