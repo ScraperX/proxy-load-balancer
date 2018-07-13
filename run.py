@@ -1,13 +1,11 @@
 import asyncio
 import logging
 from server import Server
-from proxy import Proxy
+from proxy_list import proxies  # This does not get commited since it contains actual proxy info
 
 logging.basicConfig(level=logging.DEBUG,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
-
-proxies = []
 
 s = Server('0.0.0.0', '8080', proxies, max_tries=1)
 s.start()
