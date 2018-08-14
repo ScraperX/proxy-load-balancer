@@ -3,6 +3,7 @@ import heapq
 import asyncio
 import random
 import logging
+from pprint import pprint
 
 from errors import (
     BadStatusError, BadStatusLine, BadResponseError, ErrorOnStream,
@@ -12,6 +13,7 @@ from utils import parse_headers, parse_status_line
 
 logger = logging.getLogger(__name__)
 
+global_requests = []
 
 CONNECTED = b'HTTP/1.1 200 Connection established\r\n\r\n'
 
@@ -95,19 +97,19 @@ class Server:
         self._connections[f] = (client_reader, client_writer)
 
     async def _handle(self, client_reader, client_writer):
-        logger.debug('Accepted connection from %s' % (
-                  client_writer.get_extra_info('peername'),))
+        logger.debug('Accepted connection from %s' % (client_writer.get_extra_info('peername'),))
 
         request, headers = await self._parse_request(client_reader)
         scheme = self._identify_scheme(headers)
         client = id(client_reader)
-        logger.debug(f'client: {client}; request: {request}; headers: {headers}; scheme: {scheme}')
-
-        for attempt in range(self._max_tries):
+        for attempt in range(1, self._max_tries + 1):  # This way the attempt count starts at 1
+            is_last_attempt = attempt == self._max_tries
             stime, err = 0, None
+
             proxy = await self._proxy_pool.get()
             proto = self._choice_proto(proxy, scheme)
-            logger.debug(f'client: {client}; attempt: {attempt}; proxy: {proxy}; proto: {proto}')
+            logger.debug(f'client: {client}; request: {request}; headers: {headers}; '
+                         f'scheme: {scheme}; attempt: {attempt}; proxy: {proxy}; proto: {proto}')
             try:
                 await proxy.connect()
 
@@ -130,16 +132,17 @@ class Server:
                         reader=proxy.reader, writer=client_writer,
                         scheme=scheme))]
                 await asyncio.gather(*stream, loop=self._loop)
+
             except asyncio.CancelledError:
                 logger.debug('Cancelled in server._handle')
                 break
             except (ProxyTimeoutError, ProxyConnError, ProxyRecvError,
                     ProxySendError, ProxyEmptyRecvError, BadStatusError,
                     BadResponseError) as e:
-                logger.exception(f'client: {client}')
+                proxy.log(f'client: {client} Try again {e}')
                 continue
             except ErrorOnStream as e:
-                logger.exception(f'client: {client}; EOF: {client_reader.at_eof()}')
+                logger.error(f'client: {client}; EOF: {client_reader.at_eof()}')
                 for task in stream:
                     if not task.done():
                         task.cancel()
@@ -148,7 +151,6 @@ class Server:
                     # TimeoutError, but all the data has already successfully
                     # returned, so do not consider this error of proxy
                     break
-                err = e
                 if scheme == 'HTTPS':  # SSL Handshake probably failed
                     break
             else:
@@ -162,8 +164,17 @@ class Server:
                 except NameError:
                     pass
                 else:
-                    proxy.stats['bandwidth']['up'] += len(stream[0].result())
-                    proxy.stats['bandwidth']['down'] += len(stream[1].result())
+                    try:
+                        global_requests.append({'proxy': proxy,
+                                                'bandwidth_up': len(stream[0].result()) + proxy.stats.get('bandwidth_up', 0),
+                                                'bandwidth_down': len(stream[1].result()) + proxy.stats.get('bandwidth_down', 0),
+                                                'status_code': parse_status_line(stream[1].result().split(b'\r\n', 1)[0].decode()).get('Status'),
+                                                'total_time': proxy.stats['total_time'],
+                                                })
+                    except Exception:
+                        logger.exception("Failed to save proxy stats")
+
+                pprint(global_requests)
                 proxy.close()
 
     async def _parse_request(self, reader, length=65536):
@@ -198,17 +209,19 @@ class Server:
         total_data = b''
         try:
             while not reader.at_eof():
-                data = await asyncio.wait_for(
-                    reader.read(length), self._timeout)
+                data = await asyncio.wait_for(reader.read(length), self._timeout)
                 if not data:
                     writer.close()
                     break
+
                 elif scheme and not checked:
                     self._check_response(data, scheme)
                     checked = True
-                writer.write(data)
+
                 total_data += data
+                writer.write(data)
                 await writer.drain()
+
         except (asyncio.TimeoutError, ConnectionResetError, OSError,
                 ProxyRecvError, BadStatusError, BadResponseError) as e:
             raise ErrorOnStream(e)
@@ -216,12 +229,13 @@ class Server:
         return total_data
 
     def _check_response(self, data, scheme):
-        if scheme == 'HTTP' and self._http_allowed_codes:
+        if scheme.startswith('HTTP'):
+            # Check both HTTP & HTTPS requests
             line = data.split(b'\r\n', 1)[0].decode()
             try:
                 header = parse_status_line(line)
             except BadStatusLine:
                 raise BadResponseError
-            if header['Status'] not in self._http_allowed_codes:
-                raise BadStatusError('%r not in %r' % (
-                    header['Status'], self._http_allowed_codes))
+
+            if header['Status'] >= 400:
+                raise BadStatusError(header['Status'])

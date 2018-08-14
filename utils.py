@@ -1,17 +1,6 @@
-"""Utils."""
-
-import re
-import random
 import logging
-import os
-import os.path
-import tarfile
-import urllib.request
-import tempfile
-import shutil
 
 from errors import BadStatusLine
-version = '0.0'
 
 logger = logging.getLogger(__name__)
 

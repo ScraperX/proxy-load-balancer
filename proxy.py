@@ -60,14 +60,14 @@ class Proxy:
     def set_defaults(self):
         self._closed = True
         self.stats = {'total_time': 0,
-                      'bandwidth': {'up': 0, 'down': 0},
+                      'bandwidth_up': 0,
+                      'bandwidth_down': 0,
                       'status_code': None,
                       }
         self._reader = {'conn': None, 'ssl': None}
         self._writer = {'conn': None, 'ssl': None}
 
     def __repr__(self):
-        # <Proxy US 1.12 [HTTP, HTTPS] 10.0.0.1:8080>
         tpinfo = []
         return '<Proxy {code} [{types}] {host}:{port}>'.format(
                code=self._geo, types=', '.join(self.types), host=self.host,
@@ -143,7 +143,7 @@ class Proxy:
     def close(self):
         # TODO: Log all the data about the request here
         # time (ms), bytes (up/down), status code, domain
-        self.log(f'Connection: closed {self.stats}')
+        self.log(f'Connection: closed')
 
         if self._closed:
             self.set_defaults()
@@ -159,14 +159,14 @@ class Proxy:
 
         if self._auth_token is not None:
             # Add proxy auth to header
-            logger.debug("Setting Proxy-Authorization")
+            self.log("Setting Proxy-Authorization")
             req = req.replace(b'\r\n\r\n',
                               f'\r\nProxy-Authorization: Basic {self._auth_token.strip()}\r\n\r\n'.encode())
 
         _req = req.encode() if not isinstance(req, bytes) else req
 
         try:
-            self.stats['bandwidth']['up'] += len(_req)
+            self.stats['bandwidth_up'] += len(_req)
             self.writer.write(_req)
             await self.writer.drain()
         except ConnectionResetError:
