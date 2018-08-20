@@ -1,14 +1,12 @@
 import time
-import heapq
 import asyncio
 import random
 import logging
-from pprint import pprint
 
 from errors import (
     BadStatusError, BadStatusLine, BadResponseError, ErrorOnStream,
     NoProxyError, ProxyConnError, ProxyEmptyRecvError, ProxyRecvError,
-    ProxySendError, ProxyTimeoutError, ResolveError)
+    ProxySendError, ProxyTimeoutError)
 from utils import pool_stats, parse_headers, parse_status_line
 
 logger = logging.getLogger(__name__)
@@ -21,13 +19,8 @@ CONNECTED = b'HTTP/1.1 200 Connection established\r\n\r\n'
 class ProxyPool:
     """Imports and gives proxies from queue on demand."""
 
-    def __init__(self, proxies, min_req_proxy=5,
-                 max_error_rate=0.5, max_resp_time=8):
+    def __init__(self, proxies):
         self._proxies = proxies
-        self._min_req_proxy = min_req_proxy
-        # if num of erros greater or equal 50% - proxy will be remove from pool
-        self._max_error_rate = max_error_rate
-        self._max_resp_time = max_resp_time
 
     async def get(self):
         return random.choice(self._proxies)
@@ -39,32 +32,23 @@ class Server:
     TODOs:
     - [ ] The pool should at all times have calculated stats about the proxies in its pool
     - [ ] (maybe) Store the requests in a few different ways, by proxy, by domain. More storage but faster lookups.
-    - [ ] (maybe) Get rid of max_tries and only ever try onces and let the client re send the request
     - [ ]
 
     """
 
-    def __init__(self, host, port, proxies, timeout=8, max_tries=3,
-                 min_req_proxy=5, max_error_rate=0.5, max_resp_time=8,
-                 prefer_connect=False, http_allowed_codes=None,
-                 backlog=100, loop=None, **kwargs):
+    def __init__(self, host, port, proxies, timeout=8, loop=None):
         self.host = host
         self.port = int(port)
         self._loop = loop or asyncio.get_event_loop()
         self._timeout = timeout
-        self._max_tries = max_tries
-        self._backlog = backlog
-        self._prefer_connect = prefer_connect
 
         self._server = None
         self._connections = {}
-        self._proxy_pool = ProxyPool(proxies, min_req_proxy, max_error_rate, max_resp_time)
-        self._http_allowed_codes = http_allowed_codes or []
+        self._proxy_pool = ProxyPool(proxies)
 
     def start(self):
         srv = asyncio.start_server(
-            self._accept, host=self.host, port=self.port,
-            backlog=self._backlog, loop=self._loop)
+            self._accept, host=self.host, port=self.port, loop=self._loop)
         self._server = self._loop.run_until_complete(srv)
 
         logger.info('Listening established on {0}'.format(
@@ -110,14 +94,12 @@ class Server:
         request, headers = await self._parse_request(client_reader)
         scheme = self._identify_scheme(headers)
         client = id(client_reader)
-        for attempt in range(1, self._max_tries + 1):  # This way the attempt count starts at 1
-            attempt == self._max_tries
+        for _ in range(1):  # TODO: Need to refactor to not need the loop, currently uses `breaks`
             stime = 0
-
             proxy = await self._proxy_pool.get()
             proto = self._choice_proto(proxy, scheme)
             logger.debug(f'client: {client}; request: {request}; headers: {headers}; '
-                         f'scheme: {scheme}; attempt: {attempt}; proxy: {proxy}; proto: {proto}')
+                         f'scheme: {scheme}; proxy: {proxy}; proto: {proto}')
             try:
                 await proxy.connect()
 
@@ -208,7 +190,7 @@ class Server:
 
     def _choice_proto(self, proxy, scheme):
         if scheme == 'HTTP':
-            if self._prefer_connect and ('CONNECT:80' in proxy.types):
+            if 'CONNECT:80' in proxy.types:
                 proto = 'CONNECT:80'
             else:
                 relevant = ({'HTTP', 'CONNECT:80', 'SOCKS4', 'SOCKS5'} &
