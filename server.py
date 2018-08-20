@@ -9,7 +9,7 @@ from errors import (
     BadStatusError, BadStatusLine, BadResponseError, ErrorOnStream,
     NoProxyError, ProxyConnError, ProxyEmptyRecvError, ProxyRecvError,
     ProxySendError, ProxyTimeoutError, ResolveError)
-from utils import parse_headers, parse_status_line
+from utils import pool_stats, parse_headers, parse_status_line
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,15 @@ class ProxyPool:
 
 
 class Server:
-    """Server distributes incoming requests to a pool of found proxies."""
+    """Server distributes incoming requests to its pool of proxies.
+    Each instance of this calss is a 'pool' which has proxies.
+    TODOs:
+    - [ ] The pool should at all times have calculated stats about the proxies in its pool
+    - [ ] (maybe) Store the requests in a few different ways, by proxy, by domain. More storage but faster lookups.
+    - [ ] (maybe) Get rid of max_tries and only ever try onces and let the client re send the request
+    - [ ]
+
+    """
 
     def __init__(self, host, port, proxies, timeout=8, max_tries=3,
                  min_req_proxy=5, max_error_rate=0.5, max_resp_time=8,
@@ -103,8 +111,8 @@ class Server:
         scheme = self._identify_scheme(headers)
         client = id(client_reader)
         for attempt in range(1, self._max_tries + 1):  # This way the attempt count starts at 1
-            is_last_attempt = attempt == self._max_tries
-            stime, err = 0, None
+            attempt == self._max_tries
+            stime = 0
 
             proxy = await self._proxy_pool.get()
             proto = self._choice_proto(proxy, scheme)
@@ -165,16 +173,23 @@ class Server:
                     pass
                 else:
                     try:
-                        global_requests.append({'proxy': proxy,
-                                                'bandwidth_up': len(stream[0].result()) + proxy.stats.get('bandwidth_up', 0),
-                                                'bandwidth_down': len(stream[1].result()) + proxy.stats.get('bandwidth_down', 0),
-                                                'status_code': parse_status_line(stream[1].result().split(b'\r\n', 1)[0].decode()).get('Status'),
-                                                'total_time': proxy.stats['total_time'],
-                                                })
+                        path = None
+                        # Can get path for http requests, but not for https
+                        if '/' in headers.get('Path', ''):
+                            path = '/' + headers.get('Path', '').split('/')[-1]
+
+                        pool_stats[self.port].append({'proxy': f'{proxy.host}:{proxy.port}',
+                                                      'domain': headers.get('Host'),
+                                                      'path': path,
+                                                      'scheme': scheme,
+                                                      'bandwidth_up': len(stream[0].result()) + proxy.stats.get('bandwidth_up', 0),
+                                                      'bandwidth_down': len(stream[1].result()) + proxy.stats.get('bandwidth_down', 0),
+                                                      'status_code': parse_status_line(stream[1].result().split(b'\r\n', 1)[0].decode()).get('Status'),
+                                                      'total_time': proxy.stats['total_time'],
+                                                      })
                     except Exception:
                         logger.exception("Failed to save proxy stats")
 
-                pprint(global_requests)
                 proxy.close()
 
     async def _parse_request(self, reader, length=65536):

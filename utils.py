@@ -1,8 +1,12 @@
 import logging
+from collections import defaultdict
 
 from errors import BadStatusLine
 
 logger = logging.getLogger(__name__)
+
+# Used globaly to keep track of the stats for a given pool
+pool_stats = defaultdict(list)
 
 
 def parse_status_line(line):
@@ -30,7 +34,7 @@ def parse_status_line(line):
             _headers['Host'], _headers['Port'] = host, int(port)
     return _headers
 
-# Keep
+
 def parse_headers(headers):
     headers = headers.decode('utf-8', 'ignore').split('\r\n')
     _headers = {}

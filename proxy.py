@@ -37,7 +37,7 @@ class Proxy:
     def __init__(self, host=None, port=None, username=None, password=None, types=(),
                  timeout=8, verify_ssl=False, geo_alpha2='US'):
         self.host = host
-        self.port = int(port)
+        self.port = int(port) if port is not None else 80
         self._username = username
         self._password = password
 
@@ -49,6 +49,7 @@ class Proxy:
         if self.port > 65535:
             raise ValueError('The port of proxy cannot be greater than 65535')
 
+        types = map(str.upper, types)
         self._types = set(types) & set(('HTTP', 'HTTPS', 'CONNECT:80',
                                         'CONNECT:25', 'SOCKS4', 'SOCKS5'))
         self._timeout = timeout
