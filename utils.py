@@ -1,12 +1,30 @@
 import logging
-from collections import defaultdict
+import sqlite3
 
 from errors import BadStatusLine
 
 logger = logging.getLogger(__name__)
 
 # Used globaly to keep track of the stats for a given pool
-pool_stats = defaultdict(list)
+db_con = sqlite3.connect(":memory:", check_same_thread=False)
+db_con.row_factory = sqlite3.Row
+try:
+    # Create the table each time since its in memory.
+    with db_con:
+        db_con.execute("""CREATE TABLE request (
+                              proxy varchar(256),
+                              domain varchar(256),
+                              path varchar(512),
+                              scheme varchar(16),
+                              bandwidth_up integer,
+                              bandwidth_down integer,
+                              status_code integer,
+                              total_time integer,
+                              time_of_request integer
+                          );
+                       """)
+except sqlite3.IntegrityError:
+    logger.critical("Could not create the in menory `request` table")
 
 
 def parse_status_line(line):

@@ -2,12 +2,13 @@ import time
 import asyncio
 import random
 import logging
+import sqlite3
 
 from errors import (
     BadStatusError, BadStatusLine, BadResponseError, ErrorOnStream,
     NoProxyError, ProxyConnError, ProxyEmptyRecvError, ProxyRecvError,
     ProxySendError, ProxyTimeoutError)
-from utils import pool_stats, parse_headers, parse_status_line
+from utils import parse_headers, parse_status_line, db_con
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +92,7 @@ class Server:
     async def _handle(self, client_reader, client_writer):
         logger.debug('Accepted connection from %s' % (client_writer.get_extra_info('peername'),))
 
+        time_of_request = int(time.time())  # The time the request was requested
         request, headers = await self._parse_request(client_reader)
         scheme = self._identify_scheme(headers)
         client = id(client_reader)
@@ -160,15 +162,24 @@ class Server:
                         if '/' in headers.get('Path', ''):
                             path = '/' + headers.get('Path', '').split('/')[-1]
 
-                        pool_stats[self.port].append({'proxy': f'{proxy.host}:{proxy.port}',
-                                                      'domain': headers.get('Host'),
-                                                      'path': path,
-                                                      'scheme': scheme,
-                                                      'bandwidth_up': len(stream[0].result()) + proxy.stats.get('bandwidth_up', 0),
-                                                      'bandwidth_down': len(stream[1].result()) + proxy.stats.get('bandwidth_down', 0),
-                                                      'status_code': parse_status_line(stream[1].result().split(b'\r\n', 1)[0].decode()).get('Status'),
-                                                      'total_time': proxy.stats['total_time'],
-                                                      })
+                        try:
+                            with db_con:
+                                db_con.execute("""INSERT INTO request
+                                                  (proxy, domain, path, scheme, bandwidth_up, bandwidth_down, status_code, total_time, time_of_request)
+                                                  VALUES (?,?,?,?,?,?,?,?,?)
+                                               """, (f'{proxy.host}:{proxy.port}',
+                                                     headers.get('Host'),
+                                                     path,
+                                                     scheme,
+                                                     len(stream[0].result()) + proxy.stats.get('bandwidth_up', 0),
+                                                     len(stream[1].result()) + proxy.stats.get('bandwidth_down', 0),
+                                                     parse_status_line(stream[1].result().split(b'\r\n', 1)[0].decode()).get('Status'),
+                                                     proxy.stats['total_time'],
+                                                     time_of_request)
+                                               )
+                        except sqlite3.IntegrityError:
+                            logger.critical("Failed to save request data")
+
                     except Exception:
                         logger.exception("Failed to save proxy stats")
 
