@@ -14,6 +14,7 @@ try:
         db_con.execute("""CREATE TABLE request (
                               proxy varchar(256),
                               domain varchar(256),
+                              pool varchar(128),
                               path varchar(512),
                               scheme varchar(16),
                               bandwidth_up integer,
@@ -21,6 +22,17 @@ try:
                               status_code integer,
                               total_time integer,
                               time_of_request integer
+                          );
+                       """)
+except sqlite3.IntegrityError:
+    logger.critical("Could not create the in menory `request` table")
+
+try:
+    # Create the table each time since its in memory.
+    with db_con:
+        db_con.execute("""CREATE TABLE proxy (
+                              proxy varchar(256),
+                              pool varchar(126)
                           );
                        """)
 except sqlite3.IntegrityError:

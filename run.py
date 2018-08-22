@@ -2,11 +2,14 @@ import yaml
 import asyncio
 import logging
 import argparse
+import sqlite3
 from pprint import pprint
 # Local
 import api
 from proxy import Proxy
 from server import Server
+from utils import db_con
+
 
 logging.basicConfig(level=logging.DEBUG,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -29,11 +32,19 @@ for pool in proxy_pool_config:
     proxy_list = []
     for proxy in pool['Proxies']:
         # TODO: Add lots of validation to the config inputs
+        port = proxy.get('Port', 80)
         proxy_list.append(Proxy(host=proxy['Host'],
-                                port=proxy.get('Port', 80),
+                                port=port,
                                 username=proxy.get('User'),
                                 password=proxy.get('Pass'),
                                 types=proxy.get('types', ('HTTP', 'HTTPS'))))
+        try:
+            with db_con:
+                db_con.execute("INSERT INTO proxy (proxy, pool) VALUES (?,?)",
+                               (f"{proxy['Host']}:{port}", pool['Port']))
+        except sqlite3.IntegrityError:
+            logger.critical("Failed to save request data")
+
     server_pool_list.append(Server(pool.get('Host', '0.0.0.0'), pool['Port'], proxy_list))
 
 # Start api server

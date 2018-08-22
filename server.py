@@ -20,20 +20,34 @@ CONNECTED = b'HTTP/1.1 200 Connection established\r\n\r\n'
 class ProxyPool:
     """Imports and gives proxies from queue on demand."""
 
-    def __init__(self, proxies):
-        self._proxies = proxies
+    def __init__(self, proxies, pool):
+        self._pool = pool
+        self._proxy_list = {}
+        for proxy in proxies:
+            proxy_key = f'{proxy.host}:{proxy.port}'
+            self._proxy_list[proxy_key] = proxy
 
     async def get(self):
-        return random.choice(self._proxies)
+        proxy = None
+
+        try:
+            with db_con:
+                cur = db_con.cursor()
+                cur.execute("SELECT proxy FROM proxy WHERE pool=?", (self._pool,))
+                proxy = dict(cur.fetchone())['proxy']
+                proxy = self._proxy_list[proxy]
+
+        except sqlite3.IntegrityError:
+            logger.critical("Failed to select a proxy form the pool")
+
+        return proxy
 
 
 class Server:
     """Server distributes incoming requests to its pool of proxies.
     Each instance of this calss is a 'pool' which has proxies.
     TODOs:
-    - [ ] The pool should at all times have calculated stats about the proxies in its pool
-    - [ ] (maybe) Store the requests in a few different ways, by proxy, by domain. More storage but faster lookups.
-    - [ ]
+    - The pool should at all times have calculated stats about the proxies in its pool
 
     """
 
@@ -45,7 +59,7 @@ class Server:
 
         self._server = None
         self._connections = {}
-        self._proxy_pool = ProxyPool(proxies)
+        self._proxy_pool = ProxyPool(proxies, port)
 
     def start(self):
         srv = asyncio.start_server(
@@ -165,8 +179,8 @@ class Server:
                         try:
                             with db_con:
                                 db_con.execute("""INSERT INTO request
-                                                  (proxy, domain, path, scheme, bandwidth_up, bandwidth_down, status_code, total_time, time_of_request)
-                                                  VALUES (?,?,?,?,?,?,?,?,?)
+                                                  (proxy, domain, path, scheme, bandwidth_up, bandwidth_down, status_code, total_time, time_of_request, pool)
+                                                  VALUES (?,?,?,?,?,?,?,?,?,?)
                                                """, (f'{proxy.host}:{proxy.port}',
                                                      headers.get('Host'),
                                                      path,
@@ -175,7 +189,8 @@ class Server:
                                                      len(stream[1].result()) + proxy.stats.get('bandwidth_down', 0),
                                                      parse_status_line(stream[1].result().split(b'\r\n', 1)[0].decode()).get('Status'),
                                                      proxy.stats['total_time'],
-                                                     time_of_request)
+                                                     time_of_request,
+                                                     self.port)
                                                )
                         except sqlite3.IntegrityError:
                             logger.critical("Failed to save request data")
