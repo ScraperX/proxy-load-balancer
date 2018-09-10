@@ -8,7 +8,7 @@ import sqlite3
 import api
 from proxy import Proxy, ProxyPool
 from server import Server
-from utils import db_con
+from utils import db_conn
 
 
 logging.basicConfig(level=logging.DEBUG,
@@ -41,25 +41,28 @@ for pool_rank, pool in enumerate(CONFIG.get('Pools', [])):
                                 password=proxy.get('Pass'),
                                 types=proxy.get('types', ('HTTP', 'HTTPS'))))
         try:
-            with db_con:
-                db_con.execute("INSERT INTO proxy (proxy, pool) VALUES (?,?)",
-                               (f"{proxy['Host']}:{port}", pool['Name']))
+            with db_conn:
+                db_conn.execute("INSERT INTO proxy (proxy, pool) VALUES (?,?)",
+                                (f"{proxy['Host']}:{port}", pool['Name']))
         except sqlite3.IntegrityError:
-            logger.critical("Failed to save request data")
-
-    # Add Rules to db (just worry about Domain rules for now)
-    for rule_rank, rule in enumerate(pool['Rules']['Domains']):
-        try:
-            with db_con:
-                db_con.execute("INSERT INTO pool_rule (pool, rank, rule, rule_type) VALUES (?,?,?,?)",
-                               (pool['Name'], pool_rank + (rule_rank / 100), rule, 'domain'))
-        except sqlite3.IntegrityError:
-            logger.critical("Failed to save request data")
+            logger.critical("Failed to save proxy to database")
 
 proxy_pool = ProxyPool(proxy_list)
 
+# Add Rules to db (just worry about Domain rules for now)
+for rule_rank, rule in enumerate(CONFIG['Rules']):
+    rule_pools = ','.join(rule['Pools'])
+    for re_rank, re_rule in enumerate(rule['Domains']):
+        logger.debug(f"Save rule to the database. rule={rule['Name']}; re_rule={re_rule}; pool={rule_pools}; ")
+        try:
+            with db_conn:
+                db_conn.execute("INSERT INTO pool_rule (pool, rank, rule, rule_re, rule_type) VALUES (?,?,?,?,?)",
+                                (rule_pools, rule_rank + (re_rank / 100), rule['Name'], re_rule, 'domain'))
+        except sqlite3.IntegrityError:
+            logger.critical("Failed to save rules to database")
+
 # Start pool server
-server_pool_list.append(Server(pool.get('Host', '0.0.0.0'), CONFIG['Server']['Port'], proxy_pool))
+server_pool_list.append(Server(CONFIG['Server'].get('Host', '0.0.0.0'), CONFIG['Server']['Port'], proxy_pool))
 
 # Start api server
 api.start_server(args.host, args.port)

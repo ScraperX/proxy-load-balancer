@@ -3,7 +3,7 @@ import json
 from aiohttp import web
 import logging
 import sqlite3
-from utils import db_con
+from utils import db_conn
 logger = logging.getLogger(__name__)
 
 
@@ -40,8 +40,8 @@ def get_requests():
     """
     data = []
     try:
-        with db_con:
-            cur = db_con.cursor()
+        with db_conn:
+            cur = db_conn.cursor()
             cur.execute("SELECT * FROM request")
             data = cur.fetchall()
 
@@ -60,8 +60,8 @@ def get_proxies():
     """
     data = []
     try:
-        with db_con:
-            cur = db_con.cursor()
+        with db_conn:
+            cur = db_conn.cursor()
             cur.execute("SELECT * FROM proxy")
             data = cur.fetchall()
 

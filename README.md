@@ -8,30 +8,51 @@ Find out what args can be passed in: `python run.py -h`
 Create a `yaml` file to configure the pools and what proxies are in each
 Example config file:
 ```yaml
-- Port: 8088
-  Host: '0.0.0.0'
-  Proxies:
-    - Host: proxy1.com
-      Port: 80
-      User: fooBar
-      Pass: 12345
-      Types:
-        - http
-        - https
-    - Host: proxy2
-      Port: 6000
-      Types:
-        - http
-        - https
-- Port: 8089
-  Host: '0.0.0.0'
-  Proxies:
-    - Host: proxy3
-      Port: 80
-      User: fooBar
-      Pass: 12345
-      Types:
-        - http
-        - https
+Server:
+  Host: 0.0.0.0
+  Port: 8686
+
+Rules:
+  - Name: Foo1
+    Domains:
+      - httpbin.org
+    Pools:
+      - One
+      - Two
+
+  - Name: Bar2
+    Domains:
+      - api.ipify.org
+    Pools:
+      - Two
+
+Pools:
+  - Name: One
+    Proxies:
+      - Host: proxy-a.com
+        Port: 80
+        User: user_a
+        Pass: pass_a
+        Types:
+          - http
+          - https
+      - Host: proxy-b.com
+        Port: 80
+        User: user_b
+        Pass: pass_b
+        Types:
+          - http
+          - https
+
+  - Name: Two
+    Proxies:
+      - Host: proxy-c.com
+        Port: 80
+        User: user_c
+        Pass: pass_c
+        Types:
+          - http
+          - https
+
 
 ```

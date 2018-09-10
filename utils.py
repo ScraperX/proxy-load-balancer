@@ -6,12 +6,13 @@ from errors import BadStatusLine
 logger = logging.getLogger(__name__)
 
 # Used globaly to keep track of the stats for a given pool
-db_con = sqlite3.connect(":memory:", check_same_thread=False)
-db_con.row_factory = sqlite3.Row
+db_conn = sqlite3.connect(":memory:", check_same_thread=False)
+db_conn.row_factory = sqlite3.Row
+
 try:
     # Create the table each time since its in memory.
-    with db_con:
-        db_con.execute("""CREATE TABLE request (
+    with db_conn:
+        db_conn.execute("""CREATE TABLE request (
                               proxy varchar(256),
                               domain varchar(256),
                               pool varchar(128),
@@ -29,8 +30,8 @@ except sqlite3.IntegrityError:
 
 try:
     # Create the table each time since its in memory.
-    with db_con:
-        db_con.execute("""CREATE TABLE proxy (
+    with db_conn:
+        db_conn.execute("""CREATE TABLE proxy (
                               proxy varchar(256),
                               pool varchar(126)
                           );
@@ -40,11 +41,12 @@ except sqlite3.IntegrityError:
 
 try:
     # Create the table each time since its in memory.
-    with db_con:
-        db_con.execute("""CREATE TABLE pool_rule (
+    with db_conn:
+        db_conn.execute("""CREATE TABLE pool_rule (
                               pool varchar(126),
                               rank NUMERIC,
                               rule varchar(1024),
+                              rule_re varchar(1024),
                               rule_type varchar(64)
                           );
                        """)

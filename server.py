@@ -6,7 +6,7 @@ from errors import (
     BadStatusError, BadStatusLine, BadResponseError, ErrorOnStream,
     NoProxyError, ProxyConnError, ProxyEmptyRecvError, ProxyRecvError,
     ProxySendError, ProxyTimeoutError)
-from utils import parse_headers, parse_status_line, db_con
+from utils import parse_headers, parse_status_line, db_conn
 
 logger = logging.getLogger(__name__)
 
@@ -147,22 +147,22 @@ class Server:
                             path = '/' + headers.get('Path', '').split('/')[-1]
 
                         status_code = parse_status_line(stream[1].result().split(b'\r\n', 1)[0].decode()).get('Status')
-                        with db_con:
-                            db_con.execute("""INSERT INTO request
-                                              (proxy, domain, path, scheme, bandwidth_up, bandwidth_down,
-                                               status_code, total_time, time_of_request, pool)
-                                              VALUES (?,?,?,?,?,?,?,?,?,?)
-                                              """, (f'{proxy.host}:{proxy.port}',
-                                                    headers.get('Host'),
-                                                    path,
-                                                    scheme,
-                                                    len(stream[0].result()) + proxy.stats.get('bandwidth_up', 0),
-                                                    len(stream[1].result()) + proxy.stats.get('bandwidth_down', 0),
-                                                    status_code,
-                                                    proxy.stats['total_time'],
-                                                    time_of_request,
-                                                    self.port)
-                                           )
+                        with db_conn:
+                            db_conn.execute("""INSERT INTO request
+                                               (proxy, domain, path, scheme, bandwidth_up, bandwidth_down,
+                                                status_code, total_time, time_of_request, pool)
+                                               VALUES (?,?,?,?,?,?,?,?,?,?)
+                                               """, (f'{proxy.host}:{proxy.port}',
+                                                     headers.get('Host'),
+                                                     path,
+                                                     scheme,
+                                                     len(stream[0].result()) + proxy.stats.get('bandwidth_up', 0),
+                                                     len(stream[1].result()) + proxy.stats.get('bandwidth_down', 0),
+                                                     status_code,
+                                                     proxy.stats['total_time'],
+                                                     time_of_request,
+                                                     self.port)
+                                            )
 
                     except Exception:
                         logger.exception("Failed to save request data")

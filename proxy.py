@@ -5,7 +5,7 @@ import logging
 import asyncio
 import sqlite3
 import ssl as _ssl
-from utils import db_con
+from utils import db_conn
 
 from errors import (ProxyConnError, ProxySendError, ProxyTimeoutError)
 
@@ -29,24 +29,27 @@ class ProxyPool:
         rules = self._get_rules()
 
         for rule in rules:
-            # TODO: make a cache for already known matches (momorize?)
+            # TODO: make a cache for already known matches (memoize?)
             logger.debug(f"Testing rule={rule[1]}; pool={rule[0]}; host={host};")
             match = re.search(rule[1], host)
             if match:
                 logger.debug(f"Found a match for host={host};")
                 proxy = self._get_proxy(rule[0])
-                # TODO: If ther are no more proxies left in this pool, the check other pools
+                # TODO: If there are no more proxies left in this pool, the check other pools
                 break
 
         return proxy
 
-    def _get_proxy(self, pool_name):
+    def _get_proxy(self, pools):
         proxy = None
 
+        sql_pools = pools.split(',')
+        desired_args = ','.join('?' * len(sql_pools))
         try:
-            with db_con:
-                cur = db_con.cursor()
-                cur.execute("SELECT proxy FROM proxy WHERE pool=? ORDER BY RANDOM() LIMIT 1", (pool_name,))
+            with db_conn:
+                cur = db_conn.cursor()
+                cur.execute(f"SELECT proxy FROM proxy WHERE pool in ({desired_args}) ORDER BY RANDOM() LIMIT 1",
+                            sql_pools)
                 proxy = dict(cur.fetchone())['proxy']
                 proxy = self._proxy_list[proxy]
 
@@ -59,11 +62,10 @@ class ProxyPool:
         # TODO: On server start, get and compile all rules,
         #       re run if a rule is added/removed/modified while the server is running
         rules = None
-
         try:
-            with db_con:
-                cur = db_con.cursor()
-                cur.execute("SELECT pool, rule FROM pool_rule ORDER BY rank ASC")
+            with db_conn:
+                cur = db_conn.cursor()
+                cur.execute("SELECT pool, rule_re FROM pool_rule ORDER BY rank ASC")
                 rules = cur.fetchall()
 
         except sqlite3.IntegrityError:
