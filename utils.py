@@ -38,6 +38,19 @@ try:
 except sqlite3.IntegrityError:
     logger.critical("Could not create the in menory `request` table")
 
+try:
+    # Create the table each time since its in memory.
+    with db_con:
+        db_con.execute("""CREATE TABLE pool_rule (
+                              pool varchar(126),
+                              rank NUMERIC,
+                              rule varchar(1024),
+                              rule_type varchar(64)
+                          );
+                       """)
+except sqlite3.IntegrityError:
+    logger.critical("Could not create the in menory `request` table")
+
 
 def parse_status_line(line):
     _headers = {}

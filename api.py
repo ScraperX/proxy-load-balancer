@@ -4,7 +4,6 @@ from aiohttp import web
 import logging
 import sqlite3
 from utils import db_con
-from pprint import pprint
 logger = logging.getLogger(__name__)
 
 
@@ -30,9 +29,7 @@ def start_server(host, port):
     loop = asyncio.get_event_loop()
     f = loop.create_server(app.make_handler(), host, port)
     srv = loop.run_until_complete(f)
-    logger.info('Listening established on {0}'.format(
-            srv.sockets[0].getsockname()))
-
+    logger.info('Listening established on {0}'.format(srv.sockets[0].getsockname()))
 
 
 def get_requests():
@@ -53,6 +50,7 @@ def get_requests():
 
     data = list(map(dict, data))
     return data
+
 
 def get_proxies():
     """Get all proxies in the server

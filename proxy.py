@@ -1,21 +1,75 @@
+import re
 import time
 import base64
 import logging
 import asyncio
-import warnings
+import sqlite3
 import ssl as _ssl
-from collections import Counter
+from utils import db_con
 
-from errors import (
-    ProxyEmptyRecvError, ProxyConnError, ProxyRecvError,
-    ProxySendError, ProxyTimeoutError, ResolveError)
-from utils import parse_headers
-
+from errors import (ProxyConnError, ProxySendError, ProxyTimeoutError)
 
 logger = logging.getLogger(__name__)
 
 _HTTP_PROTOS = {'HTTP', 'CONNECT:80', 'SOCKS4', 'SOCKS5'}
 _HTTPS_PROTOS = {'HTTPS', 'SOCKS4', 'SOCKS5'}
+
+
+class ProxyPool:
+    """Imports and gives proxies from queue on demand."""
+
+    def __init__(self, proxies):
+        self._proxy_list = {}
+        for proxy in proxies:
+            proxy_key = f'{proxy.host}:{proxy.port}'
+            self._proxy_list[proxy_key] = proxy
+
+    async def get(self, host):
+        proxy = None  # The proxy object to be returned
+        rules = self._get_rules()
+
+        for rule in rules:
+            # TODO: make a cache for already known matches (momorize?)
+            logger.debug(f"Testing rule={rule[1]}; pool={rule[0]}; host={host};")
+            match = re.search(rule[1], host)
+            if match:
+                logger.debug(f"Found a match for host={host};")
+                proxy = self._get_proxy(rule[0])
+                # TODO: If ther are no more proxies left in this pool, the check other pools
+                break
+
+        return proxy
+
+    def _get_proxy(self, pool_name):
+        proxy = None
+
+        try:
+            with db_con:
+                cur = db_con.cursor()
+                cur.execute("SELECT proxy FROM proxy WHERE pool=? ORDER BY RANDOM() LIMIT 1", (pool_name,))
+                proxy = dict(cur.fetchone())['proxy']
+                proxy = self._proxy_list[proxy]
+
+        except sqlite3.IntegrityError:
+            logger.critical("Failed to select a proxy from the pool")
+
+        return proxy
+
+    def _get_rules(self):
+        # TODO: On server start, get and compile all rules,
+        #       re run if a rule is added/removed/modified while the server is running
+        rules = None
+
+        try:
+            with db_con:
+                cur = db_con.cursor()
+                cur.execute("SELECT pool, rule FROM pool_rule ORDER BY rank ASC")
+                rules = cur.fetchall()
+
+        except sqlite3.IntegrityError:
+            logger.critical("Failed to select rules from the db")
+
+        return rules
 
 
 class Proxy:
@@ -44,7 +98,7 @@ class Proxy:
         self._auth_token = None
         if self._username or self._password:
             self._auth_token = base64.encodestring(f'{self._username}:{self._password}'
-                                                    .encode()).decode()
+                                                   .encode()).decode()
 
         if self.port > 65535:
             raise ValueError('The port of proxy cannot be greater than 65535')
@@ -69,7 +123,6 @@ class Proxy:
         self._writer = {'conn': None, 'ssl': None}
 
     def __repr__(self):
-        tpinfo = []
         return '<Proxy {code} [{types}] {host}:{port}>'.format(
                code=self._geo, types=', '.join(self.types), host=self.host,
                port=self.port)
@@ -105,7 +158,7 @@ class Proxy:
         log_using = log_levels.get(level.upper(), logger.debug)
 
         # Get runtime in ms
-        runtime = int(time.time()*1000 - stime*1000) if stime else 0
+        runtime = int(time.time() * 1000 - stime * 1000) if stime else 0
         self.stats['total_time'] += runtime
         log_using(f"{self.host}:{self.port} - {msg.strip()} Runtime: {runtime}ms")
 

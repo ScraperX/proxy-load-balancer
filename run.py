@@ -3,10 +3,10 @@ import asyncio
 import logging
 import argparse
 import sqlite3
-from pprint import pprint
+
 # Local
 import api
-from proxy import Proxy
+from proxy import Proxy, ProxyPool
 from server import Server
 from utils import db_con
 
@@ -26,10 +26,12 @@ args = parser.parse_args()
 server_pool_list = []
 
 with open(args.config, 'r') as stream:
-    proxy_pool_config = yaml.load(stream)
+    CONFIG = yaml.load(stream)
 
-for pool in proxy_pool_config:
-    proxy_list = []
+# Add pools to db
+proxy_list = []
+for pool_rank, pool in enumerate(CONFIG.get('Pools', [])):
+    # Add proxies to list and to db
     for proxy in pool['Proxies']:
         # TODO: Add lots of validation to the config inputs
         port = proxy.get('Port', 80)
@@ -41,11 +43,23 @@ for pool in proxy_pool_config:
         try:
             with db_con:
                 db_con.execute("INSERT INTO proxy (proxy, pool) VALUES (?,?)",
-                               (f"{proxy['Host']}:{port}", pool['Port']))
+                               (f"{proxy['Host']}:{port}", pool['Name']))
         except sqlite3.IntegrityError:
             logger.critical("Failed to save request data")
 
-    server_pool_list.append(Server(pool.get('Host', '0.0.0.0'), pool['Port'], proxy_list))
+    # Add Rules to db (just worry about Domain rules for now)
+    for rule_rank, rule in enumerate(pool['Rules']['Domains']):
+        try:
+            with db_con:
+                db_con.execute("INSERT INTO pool_rule (pool, rank, rule, rule_type) VALUES (?,?,?,?)",
+                               (pool['Name'], pool_rank + (rule_rank / 100), rule, 'domain'))
+        except sqlite3.IntegrityError:
+            logger.critical("Failed to save request data")
+
+proxy_pool = ProxyPool(proxy_list)
+
+# Start pool server
+server_pool_list.append(Server(pool.get('Host', '0.0.0.0'), CONFIG['Server']['Port'], proxy_pool))
 
 # Start api server
 api.start_server(args.host, args.port)
