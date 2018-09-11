@@ -6,13 +6,13 @@ from errors import BadStatusLine
 logger = logging.getLogger(__name__)
 
 # Used globaly to keep track of the stats for a given pool
-db_conn = sqlite3.connect(":memory:", check_same_thread=False)
+db_conn = sqlite3.connect("stats.db", check_same_thread=False)
 db_conn.row_factory = sqlite3.Row
 
 try:
     # Create the table each time since its in memory.
     with db_conn:
-        db_conn.execute("""CREATE TABLE request (
+        db_conn.execute("""CREATE TABLE IF NOT EXISTS request (
                                proxy varchar(256),
                                domain varchar(256),
                                pool varchar(128),
@@ -32,18 +32,19 @@ except sqlite3.IntegrityError:
 try:
     # Create the table each time since its in memory.
     with db_conn:
-        db_conn.execute("""CREATE TABLE proxy (
+        db_conn.execute("""CREATE TABLE IF NOT EXISTS proxy (
                                proxy varchar(256),
                                pool varchar(126)
                            );
                         """)
+        db_conn.execute("DELETE FROM proxy")  # Needed until we get a more fancy when the server starts
 except sqlite3.IntegrityError:
     logger.critical("Could not create the in menory `request` table")
 
 try:
     # Create the table each time since its in memory.
     with db_conn:
-        db_conn.execute("""CREATE TABLE pool_rule (
+        db_conn.execute("""CREATE TABLE IF NOT EXISTS pool_rule (
                                pool varchar(126),
                                rank NUMERIC,
                                rule varchar(1024),
@@ -51,6 +52,7 @@ try:
                                rule_type varchar(64)
                            );
                         """)
+        db_conn.execute("DELETE FROM pool_rule")  # Needed until we get a more fancy when the server starts
 except sqlite3.IntegrityError:
     logger.critical("Could not create the in menory `request` table")
 
