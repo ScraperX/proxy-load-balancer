@@ -13,18 +13,19 @@ try:
     # Create the table each time since its in memory.
     with db_conn:
         db_conn.execute("""CREATE TABLE request (
-                              proxy varchar(256),
-                              domain varchar(256),
-                              pool varchar(128),
-                              path varchar(512),
-                              scheme varchar(16),
-                              bandwidth_up integer,
-                              bandwidth_down integer,
-                              status_code integer,
-                              total_time integer,
-                              time_of_request integer
-                          );
-                       """)
+                               proxy varchar(256),
+                               domain varchar(256),
+                               pool varchar(128),
+                               path varchar(512),
+                               scheme varchar(16),
+                               bandwidth_up integer,
+                               bandwidth_down integer,
+                               status_code integer,
+                               error varchar(128),
+                               total_time integer,
+                               time_of_request integer
+                           );
+                        """)
 except sqlite3.IntegrityError:
     logger.critical("Could not create the in menory `request` table")
 
@@ -32,10 +33,10 @@ try:
     # Create the table each time since its in memory.
     with db_conn:
         db_conn.execute("""CREATE TABLE proxy (
-                              proxy varchar(256),
-                              pool varchar(126)
-                          );
-                       """)
+                               proxy varchar(256),
+                               pool varchar(126)
+                           );
+                        """)
 except sqlite3.IntegrityError:
     logger.critical("Could not create the in menory `request` table")
 
@@ -43,13 +44,13 @@ try:
     # Create the table each time since its in memory.
     with db_conn:
         db_conn.execute("""CREATE TABLE pool_rule (
-                              pool varchar(126),
-                              rank NUMERIC,
-                              rule varchar(1024),
-                              rule_re varchar(1024),
-                              rule_type varchar(64)
-                          );
-                       """)
+                               pool varchar(126),
+                               rank NUMERIC,
+                               rule varchar(1024),
+                               rule_re varchar(1024),
+                               rule_type varchar(64)
+                           );
+                        """)
 except sqlite3.IntegrityError:
     logger.critical("Could not create the in menory `request` table")
 

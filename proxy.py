@@ -25,7 +25,8 @@ class ProxyPool:
             self._proxy_list[proxy_key] = proxy
 
     async def get(self, host):
-        proxy = None  # The proxy object to be returned
+        proxy = None
+        pool_name = None
         rules = self._get_rules()
 
         for rule in rules:
@@ -35,10 +36,11 @@ class ProxyPool:
             if match:
                 logger.debug(f"Found a match for host={host};")
                 proxy = self._get_proxy(rule[0])
+                pool_name = rule[0]
                 # TODO: If there are no more proxies left in this pool, the check other pools
                 break
 
-        return proxy
+        return proxy, pool_name
 
     def _get_proxy(self, pools):
         proxy = None

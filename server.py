@@ -82,90 +82,101 @@ class Server:
         request, headers = await self._parse_request(client_reader)
         scheme = self._identify_scheme(headers)
         client = id(client_reader)
-        for _ in range(1):  # TODO: Need to refactor to not need the loop, currently uses `breaks`
-            stime = 0
-            proxy = await self._proxy_pool.get(headers['Host'])
-            proto = self._choice_proto(proxy, scheme)
-            logger.debug(f'client: {client}; request: {request}; headers: {headers}; '
-                         f'scheme: {scheme}; proxy: {proxy}; proto: {proto}')
-            try:
-                await proxy.connect()
+        stime = 0
+        proxy, pool = await self._proxy_pool.get(headers['Host'])
+        proto = self._choice_proto(proxy, scheme)
+        logger.debug(f'client: {client}; request: {request}; headers: {headers}; '
+                     f'scheme: {scheme}; proxy: {proxy}; proto: {proto}')
+        try:
+            await proxy.connect()
 
-                if proto in ('CONNECT:80', 'SOCKS4', 'SOCKS5'):
-                    if scheme == 'HTTPS' and proto in ('SOCKS4', 'SOCKS5'):
-                        client_writer.write(CONNECTED)
-                        await client_writer.drain()
-                    else:  # HTTP
-                        await proxy.send(request)
-                else:  # proto: HTTP & HTTPS
+            if proto in ('CONNECT:80', 'SOCKS4', 'SOCKS5'):
+                if scheme == 'HTTPS' and proto in ('SOCKS4', 'SOCKS5'):
+                    client_writer.write(CONNECTED)
+                    await client_writer.drain()
+                else:  # HTTP
                     await proxy.send(request)
+            else:  # proto: HTTP & HTTPS
+                await proxy.send(request)
 
-                stime = time.time()
-                stream = [
-                    asyncio.ensure_future(self._stream(
-                        reader=client_reader, writer=proxy.writer)),
-                    asyncio.ensure_future(self._stream(
-                        reader=proxy.reader, writer=client_writer,
-                        scheme=scheme))]
-                await asyncio.gather(*stream, loop=self._loop)
+            stime = time.time()
+            stream = [
+                asyncio.ensure_future(self._stream(
+                    reader=client_reader, writer=proxy.writer)),
+                asyncio.ensure_future(self._stream(
+                    reader=proxy.reader, writer=client_writer,
+                    scheme=scheme))]
+            await asyncio.gather(*stream, loop=self._loop)
 
-            except asyncio.CancelledError:
-                logger.debug('Cancelled in server._handle')
-                break
-            except (ProxyTimeoutError, ProxyConnError, ProxyRecvError,
-                    ProxySendError, ProxyEmptyRecvError, BadStatusError,
-                    BadResponseError) as e:
-                proxy.log(f'client: {client} Try again {e}')
-                continue
-            except ErrorOnStream as e:
-                logger.error(f'client: {client}; EOF: {client_reader.at_eof()}')
-                for task in stream:
-                    if not task.done():
-                        task.cancel()
-                if client_reader.at_eof() and 'Timeout' in repr(e):
-                    # Proxy may not be able to receive EOF and will raise a
-                    # TimeoutError, but all the data has already successfully
-                    # returned, so do not consider this error of proxy
-                    break
-                if scheme == 'HTTPS':  # SSL Handshake probably failed
-                    break
+        except asyncio.CancelledError:
+            logger.debug('Cancelled in server._handle')
+        except ErrorOnStream as e:
+            logger.error(f'client: {client}; EOF: {client_reader.at_eof()}')
+            for task in stream:
+                if not task.done():
+                    task.cancel()
+            # if client_reader.at_eof() and 'Timeout' in repr(e):
+            #     # Proxy may not be able to receive EOF and will raise a
+            #     # TimeoutError, but all the data has already successfully
+            #     # returned, so do not consider this error of proxy
+            #     break
+            # if scheme == 'HTTPS':  # SSL Handshake probably failed
+            #     break
+        else:
+            pass
+        finally:
+            proxy.log(request.decode(), stime)
+            # At this point, the client has already disconnected and now the stats can be processed and saved
+            try:
+                # Make sure stream exist, if it does lets get some info from it
+                stream
+            except NameError:
+                pass
             else:
-                break
-            finally:
-                proxy.log(request.decode(), stime)
-                # At this point, the client has already disconnected and now the stats can be processed and saved
                 try:
-                    # Make sure stream exist, if it does lets get some info from it
-                    stream
-                except NameError:
-                    pass
-                else:
+                    proxy_url = f'{proxy.host}:{proxy.port}'
+                    path = None
+                    # Can get path for http requests, but not for https
+                    if '/' in headers.get('Path', ''):
+                        path = '/' + headers.get('Path', '').split('/')[-1]
+
                     try:
-                        path = None
-                        # Can get path for http requests, but not for https
-                        if '/' in headers.get('Path', ''):
-                            path = '/' + headers.get('Path', '').split('/')[-1]
-
                         status_code = parse_status_line(stream[1].result().split(b'\r\n', 1)[0].decode()).get('Status')
-                        with db_conn:
-                            db_conn.execute("""INSERT INTO request
-                                               (proxy, domain, path, scheme, bandwidth_up, bandwidth_down,
-                                                status_code, total_time, time_of_request, pool)
-                                               VALUES (?,?,?,?,?,?,?,?,?,?)
-                                               """, (f'{proxy.host}:{proxy.port}',
-                                                     headers.get('Host'),
-                                                     path,
-                                                     scheme,
-                                                     len(stream[0].result()) + proxy.stats.get('bandwidth_up', 0),
-                                                     len(stream[1].result()) + proxy.stats.get('bandwidth_down', 0),
-                                                     status_code,
-                                                     proxy.stats['total_time'],
-                                                     time_of_request,
-                                                     self.port)
-                                            )
+                        error = None
+                    except Exception as e:
+                        logger.exception(f"Issue getting status code: proxy={proxy_url}; host={headers.get('Host')}")
+                        status_code = None
+                        error = e.__class__.__name__
 
-                    except Exception:
-                        logger.exception("Failed to save request data")
+                    try:
+                        proxy_bandwidth_up = len(stream[0].result()) + proxy.stats.get('bandwidth_up', 0)
+                        proxy_bandwidth_down = len(stream[1].result()) + proxy.stats.get('bandwidth_down', 0)
+                    except:
+                        # Happens if something goes wrong with the connection
+                        logger.exception(f"Stream issue: proxy={proxy_url}; host={headers.get('Host')}")
+                        proxy_bandwidth_up = None
+                        proxy_bandwidth_down = None
+
+                    with db_conn:
+                        db_conn.execute("""INSERT INTO request
+                                           (proxy, domain, path, scheme, bandwidth_up, bandwidth_down,
+                                            status_code, error, total_time, time_of_request, pool)
+                                           VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                                           """, (proxy_url,
+                                                 headers.get('Host'),
+                                                 path,
+                                                 scheme,
+                                                 proxy_bandwidth_up,
+                                                 proxy_bandwidth_down,
+                                                 status_code,
+                                                 error,
+                                                 proxy.stats['total_time'],
+                                                 time_of_request,
+                                                 pool)
+                                        )
+
+                except Exception:
+                    logger.exception("Failed to save request data")
 
                 proxy.close()
 
