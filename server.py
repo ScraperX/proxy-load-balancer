@@ -3,9 +3,8 @@ import asyncio
 import logging
 
 from errors import (
-    BadStatusError, BadStatusLine, BadResponseError, ErrorOnStream,
-    NoProxyError, ProxyConnError, ProxyEmptyRecvError, ProxyRecvError,
-    ProxySendError, ProxyTimeoutError)
+    BadStatusLine, BadResponseError, ErrorOnStream,
+    NoProxyError, ProxyRecvError)
 from utils import parse_headers, parse_status_line, db_conn
 
 logger = logging.getLogger(__name__)
@@ -238,6 +237,6 @@ class Server:
             # Check both HTTP & HTTPS requests
             line = data.split(b'\r\n', 1)[0].decode()
             try:
-                header = parse_status_line(line)
+                parse_status_line(line)
             except BadStatusLine:
                 raise BadResponseError
