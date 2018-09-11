@@ -167,7 +167,6 @@ class Proxy:
         log_using(f"{self.host}:{self.port} - {msg.strip()} Runtime: {runtime}ms")
 
     async def connect(self, ssl=False):
-        err = None
         msg = 'SSL: ' if ssl else ''
         self.log(f'{msg}Initial connection')
         stime = time.time()
@@ -186,12 +185,10 @@ class Proxy:
 
         except asyncio.TimeoutError:
             msg += 'Connection: timeout'
-            err = ProxyTimeoutError(msg)
-            raise err
+            raise ProxyTimeoutError(msg)
         except (ConnectionRefusedError, OSError, _ssl.SSLError):
             msg += 'Connection: failed'
-            err = ProxyConnError(msg)
-            raise err
+            raise ProxyConnError(msg)
         else:
             msg += 'Connection: success'
             self._closed = False
@@ -213,7 +210,7 @@ class Proxy:
         self.set_defaults()
 
     async def send(self, req):
-        msg, err = '', None
+        msg = ''
 
         if self._auth_token is not None:
             # Add proxy auth to header
@@ -229,7 +226,6 @@ class Proxy:
             await self.writer.drain()
         except ConnectionResetError:
             msg = '; Sending: failed'
-            err = ProxySendError(msg)
-            raise err
+            raise ProxySendError(msg)
         finally:
-            self.log('Request: %s%s' % (req, msg))
+            self.log(f'Request: {req}{msg}')

@@ -82,6 +82,7 @@ class Server:
         request, headers = await self._parse_request(client_reader)
         scheme = self._identify_scheme(headers)
         client = id(client_reader)
+        error = None
         stime = 0
         proxy, pool = await self._proxy_pool.get(headers['Host'])
         proto = self._choice_proto(proxy, scheme)
@@ -110,75 +111,76 @@ class Server:
 
         except asyncio.CancelledError:
             logger.debug('Cancelled in server._handle')
+            error = 'Cancelled in server._handle'
+
         except ErrorOnStream as e:
             logger.error(f'client: {client}; EOF: {client_reader.at_eof()}')
             for task in stream:
                 if not task.done():
                     task.cancel()
-            # if client_reader.at_eof() and 'Timeout' in repr(e):
-            #     # Proxy may not be able to receive EOF and will raise a
-            #     # TimeoutError, but all the data has already successfully
-            #     # returned, so do not consider this error of proxy
-            #     break
-            # if scheme == 'HTTPS':  # SSL Handshake probably failed
-            #     break
-        else:
-            pass
+            if client_reader.at_eof() and 'Timeout' in repr(e):
+                # Proxy may not be able to receive EOF and will raise a
+                # TimeoutError, but all the data has already successfully
+                # returned, so do not consider this error of proxy
+                error = 'TimeoutError'
+
+            if scheme == 'HTTPS':  # SSL Handshake probably failed
+                error = 'SSL Error'
+
+        except Exception as e:
+            # Cath anything that falls through
+            logger.error("Catch all in server")
+            error = repr(e)
+
         finally:
             proxy.log(request.decode(), stime)
             # At this point, the client has already disconnected and now the stats can be processed and saved
             try:
-                # Make sure stream exist, if it does lets get some info from it
-                stream
-            except NameError:
-                pass
-            else:
+                proxy_url = f'{proxy.host}:{proxy.port}'
+                path = None
+                # Can get path for http requests, but not for https
+                if '/' in headers.get('Path', ''):
+                    path = '/' + headers.get('Path', '').split('/')[-1]
+
                 try:
-                    proxy_url = f'{proxy.host}:{proxy.port}'
-                    path = None
-                    # Can get path for http requests, but not for https
-                    if '/' in headers.get('Path', ''):
-                        path = '/' + headers.get('Path', '').split('/')[-1]
+                    status_code = parse_status_line(stream[1].result().split(b'\r\n', 1)[0].decode()).get('Status')
+                except Exception as e:
+                    logger.error(f"Issue getting status code: proxy={proxy_url}; host={headers.get('Host')}")
+                    status_code = None
+                    if error is None:
+                        error = repr(e)
 
-                    try:
-                        status_code = parse_status_line(stream[1].result().split(b'\r\n', 1)[0].decode()).get('Status')
-                        error = None
-                    except Exception as e:
-                        logger.exception(f"Issue getting status code: proxy={proxy_url}; host={headers.get('Host')}")
-                        status_code = None
-                        error = e.__class__.__name__
-
-                    try:
-                        proxy_bandwidth_up = len(stream[0].result()) + proxy.stats.get('bandwidth_up', 0)
-                        proxy_bandwidth_down = len(stream[1].result()) + proxy.stats.get('bandwidth_down', 0)
-                    except:
-                        # Happens if something goes wrong with the connection
-                        logger.exception(f"Stream issue: proxy={proxy_url}; host={headers.get('Host')}")
-                        proxy_bandwidth_up = None
-                        proxy_bandwidth_down = None
-
-                    with db_conn:
-                        db_conn.execute("""INSERT INTO request
-                                           (proxy, domain, path, scheme, bandwidth_up, bandwidth_down,
-                                            status_code, error, total_time, time_of_request, pool)
-                                           VALUES (?,?,?,?,?,?,?,?,?,?,?)
-                                           """, (proxy_url,
-                                                 headers.get('Host'),
-                                                 path,
-                                                 scheme,
-                                                 proxy_bandwidth_up,
-                                                 proxy_bandwidth_down,
-                                                 status_code,
-                                                 error,
-                                                 proxy.stats['total_time'],
-                                                 time_of_request,
-                                                 pool)
-                                        )
-
+                try:
+                    proxy_bandwidth_up = len(stream[0].result()) + proxy.stats.get('bandwidth_up', 0)
+                    proxy_bandwidth_down = len(stream[1].result()) + proxy.stats.get('bandwidth_down', 0)
                 except Exception:
-                    logger.exception("Failed to save request data")
+                    # Happens if something goes wrong with the connection
+                    logger.error(f"Stream issue: proxy={proxy_url}; host={headers.get('Host')}")
+                    proxy_bandwidth_up = None
+                    proxy_bandwidth_down = None
 
-                proxy.close()
+                with db_conn:
+                    db_conn.execute("""INSERT INTO request
+                                       (proxy, domain, path, scheme, bandwidth_up, bandwidth_down,
+                                        status_code, error, total_time, time_of_request, pool)
+                                       VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                                       """, (proxy_url,
+                                             headers.get('Host'),
+                                             path,
+                                             scheme,
+                                             proxy_bandwidth_up,
+                                             proxy_bandwidth_down,
+                                             status_code,
+                                             error,
+                                             proxy.stats['total_time'],
+                                             time_of_request,
+                                             pool)
+                                    )
+
+            except Exception:
+                logger.exception("Failed to save request data")
+
+            proxy.close()
 
     async def _parse_request(self, reader, length=65536):
         request = await reader.read(length)
@@ -226,7 +228,7 @@ class Server:
                 await writer.drain()
 
         except (asyncio.TimeoutError, ConnectionResetError, OSError,
-                ProxyRecvError, BadStatusError, BadResponseError) as e:
+                ProxyRecvError, BadResponseError) as e:
             raise ErrorOnStream(e)
 
         return total_data
@@ -239,6 +241,3 @@ class Server:
                 header = parse_status_line(line)
             except BadStatusLine:
                 raise BadResponseError
-
-            if header['Status'] >= 400:
-                raise BadStatusError(header['Status'])

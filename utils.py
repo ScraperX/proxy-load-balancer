@@ -78,6 +78,7 @@ def parse_status_line(line):
         if _headers['Method'] == 'CONNECT':
             host, port = path.split(':')
             _headers['Host'], _headers['Port'] = host, int(port)
+
     return _headers
 
 
