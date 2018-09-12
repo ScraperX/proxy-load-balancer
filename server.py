@@ -161,8 +161,8 @@ class Server:
                 with db_conn:
                     db_conn.execute("""INSERT INTO request
                                        (proxy, domain, path, scheme, bandwidth_up, bandwidth_down,
-                                        status_code, error, total_time, time_of_request, pool)
-                                       VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                                        status_code, error, total_time, time_of_request, pool, port)
+                                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
                                        """, (proxy_url,
                                              headers.get('Host'),
                                              path,
@@ -173,7 +173,8 @@ class Server:
                                              error,
                                              proxy.stats['total_time'],
                                              time_of_request,
-                                             pool)
+                                             pool,
+                                             self.port)
                                     )
 
             except Exception:

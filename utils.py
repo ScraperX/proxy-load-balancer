@@ -16,6 +16,7 @@ try:
                                proxy varchar(256),
                                domain varchar(256),
                                pool varchar(128),
+                               port integer,
                                path varchar(512),
                                scheme varchar(16),
                                bandwidth_up integer,
