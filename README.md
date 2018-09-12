@@ -10,10 +10,11 @@ Example config file:
 ```yaml
 Server:
   Host: 0.0.0.0
-  Port: 8686
+  API: 8181
 
 Rules:
   - Name: Foo1
+    Port: 8686
     Domains:
       - httpbin.org
     Pools:
@@ -21,6 +22,7 @@ Rules:
       - Two
 
   - Name: Bar2
+    Port: 8686
     Domains:
       - api.ipify.org
     Pools:

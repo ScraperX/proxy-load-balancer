@@ -24,10 +24,10 @@ class ProxyPool:
             proxy_key = f'{proxy.host}:{proxy.port}'
             self._proxy_list[proxy_key] = proxy
 
-    async def get(self, host):
+    async def get(self, host, port):
         proxy = None
         pool_name = None
-        rules = self._get_rules()
+        rules = self._get_rules(port)
 
         for rule in rules:
             # TODO: make a cache for already known matches (memoize?)
@@ -60,14 +60,14 @@ class ProxyPool:
 
         return proxy
 
-    def _get_rules(self):
+    def _get_rules(self, port):
         # TODO: On server start, get and compile all rules,
         #       re run if a rule is added/removed/modified while the server is running
         rules = None
         try:
             with db_conn:
                 cur = db_conn.cursor()
-                cur.execute("SELECT pool, rule_re FROM pool_rule ORDER BY rank ASC")
+                cur.execute("SELECT pool, rule_re FROM pool_rule WHERE port=? ORDER BY rank ASC", (port,))
                 rules = cur.fetchall()
 
         except sqlite3.IntegrityError:

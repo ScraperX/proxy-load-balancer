@@ -46,6 +46,7 @@ try:
     with db_conn:
         db_conn.execute("""CREATE TABLE IF NOT EXISTS pool_rule (
                                pool varchar(126),
+                               port integer,
                                rank NUMERIC,
                                rule varchar(1024),
                                rule_re varchar(1024),

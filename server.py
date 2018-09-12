@@ -83,7 +83,7 @@ class Server:
         client = id(client_reader)
         error = None
         stime = 0
-        proxy, pool = await self._proxy_pool.get(headers['Host'])
+        proxy, pool = await self._proxy_pool.get(headers['Host'], self.port)
         proto = self._choice_proto(proxy, scheme)
         logger.debug(f'client: {client}; request: {request}; headers: {headers}; '
                      f'scheme: {scheme}; proxy: {proxy}; proto: {proto}')
