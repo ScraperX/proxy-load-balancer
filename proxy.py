@@ -196,8 +196,6 @@ class Proxy:
             self.log(msg, stime)
 
     def close(self):
-        # TODO: Log all the data about the request here
-        # time (ms), bytes (up/down), status code, domain
         self.log(f'Connection: closed')
 
         if self._closed:

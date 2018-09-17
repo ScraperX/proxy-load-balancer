@@ -22,7 +22,7 @@ class Server:
 
     """
 
-    def __init__(self, host, port, proxy_pool, timeout=8, loop=None):
+    def __init__(self, host, port, proxy_pool, timeout=30, loop=None):
         self.host = host
         self.port = int(port)
         self._loop = loop or asyncio.get_event_loop()
@@ -63,7 +63,7 @@ class Server:
             try:
                 exc = f.exception()
             except asyncio.CancelledError:
-                logger.debug('CancelledError in server._handle:_on_completion')
+                logger.error('CancelledError in server._handle:_on_completion')
                 exc = None
             if exc:
                 if isinstance(exc, NoProxyError):
@@ -101,19 +101,19 @@ class Server:
 
             stime = time.time()
             stream = [
-                asyncio.ensure_future(self._stream(
-                    reader=client_reader, writer=proxy.writer)),
-                asyncio.ensure_future(self._stream(
-                    reader=proxy.reader, writer=client_writer,
-                    scheme=scheme))]
+                asyncio.ensure_future(
+                    self._stream(reader=client_reader, writer=proxy.writer)),
+                asyncio.ensure_future(
+                    self._stream(reader=proxy.reader, writer=client_writer, scheme=scheme))
+                ]
             await asyncio.gather(*stream, loop=self._loop)
 
         except asyncio.CancelledError:
-            logger.debug('Cancelled in server._handle')
+            logger.error('Cancelled in server._handle')
             error = 'Cancelled in server._handle'
 
         except ErrorOnStream as e:
-            logger.error(f'client: {client}; EOF: {client_reader.at_eof()}')
+            logger.error(f'client: {client}; EOF: {client_reader.at_eof()}; Error: {e}')
             for task in stream:
                 if not task.done():
                     task.cancel()
@@ -127,8 +127,8 @@ class Server:
                 error = 'SSL Error'
 
         except Exception as e:
-            # Cath anything that falls through
-            logger.error("Catch all in server")
+            # Catch anything that falls through
+            logger.exception("Catch all in server")
             error = repr(e)
 
         finally:
