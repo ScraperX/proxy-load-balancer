@@ -1,10 +1,10 @@
 import time
 import asyncio
 import logging
-
+from proxy import get_proxy
 from errors import (
     BadStatusLine, BadResponseError, ErrorOnStream,
-    NoProxyError, ProxyRecvError)
+    NoProxyError, ProxyRecvError, ProxyTimeoutError)
 from utils import parse_headers, parse_status_line, db_conn
 
 logger = logging.getLogger(__name__)
@@ -22,7 +22,7 @@ class Server:
 
     """
 
-    def __init__(self, host, port, proxy_pool, timeout=30, loop=None):
+    def __init__(self, host, port, timeout=30, loop=None):
         self.host = host
         self.port = int(port)
         self._loop = loop or asyncio.get_event_loop()
@@ -30,7 +30,6 @@ class Server:
 
         self._server = None
         self._connections = {}
-        self._proxy_pool = proxy_pool
 
     def start(self):
         srv = asyncio.start_server(
@@ -83,7 +82,7 @@ class Server:
         client = id(client_reader)
         error = None
         stime = 0
-        proxy, pool = await self._proxy_pool.get(headers['Host'], self.port)
+        proxy, pool = await get_proxy(headers['Host'], self.port)
         proto = self._choice_proto(proxy, scheme)
         logger.debug(f'client: {client}; request: {request}; headers: {headers}; '
                      f'scheme: {scheme}; proxy: {proxy}; proto: {proto}')
@@ -100,12 +99,9 @@ class Server:
                 await proxy.send(request)
 
             stime = time.time()
-            stream = [
-                asyncio.ensure_future(
-                    self._stream(reader=client_reader, writer=proxy.writer)),
-                asyncio.ensure_future(
-                    self._stream(reader=proxy.reader, writer=client_writer, scheme=scheme))
-                ]
+            stream = [asyncio.ensure_future(self._stream(reader=client_reader, writer=proxy.writer)),
+                      asyncio.ensure_future(self._stream(reader=proxy.reader, writer=client_writer, scheme=scheme))
+                      ]
             await asyncio.gather(*stream, loop=self._loop)
 
         except asyncio.CancelledError:
@@ -126,6 +122,11 @@ class Server:
             if scheme == 'HTTPS':  # SSL Handshake probably failed
                 error = 'SSL Error'
 
+        except ProxyTimeoutError:
+            logger.error("Proxy timeout")
+            error = 'Proxy Timeout'
+            # TODO: Send client a 408 status code
+
         except Exception as e:
             # Catch anything that falls through
             logger.exception("Catch all in server")
@@ -144,7 +145,7 @@ class Server:
                 try:
                     status_code = parse_status_line(stream[1].result().split(b'\r\n', 1)[0].decode()).get('Status')
                 except Exception as e:
-                    logger.error(f"Issue getting status code: proxy={proxy_url}; host={headers.get('Host')}")
+                    logger.warning(f"Issue saving status code: proxy={proxy_url}; host={headers.get('Host')}")
                     status_code = None
                     if error is None:
                         error = repr(e)
@@ -154,7 +155,7 @@ class Server:
                     proxy_bandwidth_down = len(stream[1].result()) + proxy.stats.get('bandwidth_down', 0)
                 except Exception:
                     # Happens if something goes wrong with the connection
-                    logger.error(f"Stream issue: proxy={proxy_url}; host={headers.get('Host')}")
+                    logger.warning(f"Issue saving bandwidth: proxy={proxy_url}; host={headers.get('Host')}")
                     proxy_bandwidth_up = None
                     proxy_bandwidth_down = None
 

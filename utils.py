@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 # Used globaly to keep track of the stats for a given pool
 db_conn = None
-db_conn = sqlite3.connect(":memory:", check_same_thread=False)
+db_conn = sqlite3.connect("stats.db", check_same_thread=False)
 db_conn.row_factory = sqlite3.Row
 
 try:
@@ -35,7 +35,11 @@ try:
     # Create the table each time since its in memory.
     with db_conn:
         db_conn.execute("""CREATE TABLE IF NOT EXISTS proxy (
-                               proxy varchar(256),
+                               host varchar(256),
+                               username varchar(256),
+                               password varchar(256),
+                               port integer,
+                               types varchar(256),
                                pool varchar(126)
                            );
                         """)

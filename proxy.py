@@ -15,65 +15,64 @@ _HTTP_PROTOS = {'HTTP', 'CONNECT:80', 'SOCKS4', 'SOCKS5'}
 _HTTPS_PROTOS = {'HTTPS', 'SOCKS4', 'SOCKS5'}
 
 
-class ProxyPool:
-    """Imports and gives proxies from queue on demand."""
+async def get_proxy(host, port):
+    proxy = None
+    pool_name = None
+    rules = _get_rules(port)
 
-    def __init__(self, proxies):
-        self._proxy_list = {}
-        for proxy in proxies:
-            proxy_key = f'{proxy.host}:{proxy.port}'
-            self._proxy_list[proxy_key] = proxy
+    for rule in rules:
+        # TODO: make a cache for already known matches (memoize?)
+        logger.debug(f"Testing rule={rule[1]}; pool={rule[0]}; host={host};")
+        match = re.search(rule[1], host)
+        if match:
+            logger.debug(f"Found a match for host={host};")
+            proxy = _select_proxy(rule[0])
+            pool_name = rule[0]
+            # TODO: If there are no more proxies left in this pool, then check other pools
+            break
 
-    async def get(self, host, port):
-        proxy = None
-        pool_name = None
-        rules = self._get_rules(port)
+    return proxy, pool_name
 
-        for rule in rules:
-            # TODO: make a cache for already known matches (memoize?)
-            logger.debug(f"Testing rule={rule[1]}; pool={rule[0]}; host={host};")
-            match = re.search(rule[1], host)
-            if match:
-                logger.debug(f"Found a match for host={host};")
-                proxy = self._get_proxy(rule[0])
-                pool_name = rule[0]
-                # TODO: If there are no more proxies left in this pool, the check other pools
-                break
 
-        return proxy, pool_name
+def _select_proxy(pools):
+    proxy = None
 
-    def _get_proxy(self, pools):
-        proxy = None
+    sql_pools = pools.split(',')
+    desired_args = ','.join('?' * len(sql_pools))
+    try:
+        with db_conn:
+            cur = db_conn.cursor()
+            cur.execute(f"""SELECT host, port, username, password, types
+                            FROM proxy WHERE pool in ({desired_args})
+                            ORDER BY RANDOM() LIMIT 1""",
+                        sql_pools)
+            proxy = dict(cur.fetchone())
 
-        sql_pools = pools.split(',')
-        desired_args = ','.join('?' * len(sql_pools))
-        try:
-            with db_conn:
-                cur = db_conn.cursor()
-                cur.execute(f"SELECT proxy FROM proxy WHERE pool in ({desired_args}) ORDER BY RANDOM() LIMIT 1",
-                            sql_pools)
-                proxy = dict(cur.fetchone())['proxy']
-                proxy = self._proxy_list[proxy]
+    except sqlite3.IntegrityError:
+        logger.critical("Failed to select a proxy from the pool")
 
-        except sqlite3.IntegrityError:
-            logger.critical("Failed to select a proxy from the pool")
+    new_proxy = Proxy(host=proxy['host'],
+                      port=proxy['port'],
+                      username=proxy['username'],
+                      password=proxy['password'],
+                      types=proxy['types'].split(','))
+    return new_proxy
 
-        return proxy
 
-    def _get_rules(self, port):
-        # TODO: On server start, get and compile all rules,
-        #       re run if a rule is added/removed/modified while the server is running
-        rules = None
-        try:
-            with db_conn:
-                cur = db_conn.cursor()
-                cur.execute("SELECT pool, rule_re FROM pool_rule WHERE port=? ORDER BY rank ASC", (port,))
-                rules = cur.fetchall()
+def _get_rules(port):
+    # TODO: On server start, get and compile all rules,
+    #       re run if a rule is added/removed/modified while the server is running
+    rules = None
+    try:
+        with db_conn:
+            cur = db_conn.cursor()
+            cur.execute("SELECT pool, rule_re FROM pool_rule WHERE port=? ORDER BY rank ASC", (port,))
+            rules = cur.fetchall()
 
-        except sqlite3.IntegrityError:
-            logger.critical("Failed to select rules from the db")
+    except sqlite3.IntegrityError:
+        logger.critical("Failed to select rules from the db")
 
-        return rules
+    return rules
 
 
 class Proxy:
