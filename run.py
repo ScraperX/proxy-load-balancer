@@ -1,33 +1,19 @@
-import yaml
 import asyncio
 import sqlite3
 import logging
-import argparse
 
 # Local
 import api
+from config import CONFIG
 from server import Server
 from utils import db_conn
 
 
-logging.basicConfig(level=logging.INFO,
-                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
-
-parser = argparse.ArgumentParser(description='Run the Proxy Load Balancer')
-parser.add_argument('-c', '--config', help='yaml config file', required=True)
-# TODO: Make overrides for server config values
-args = parser.parse_args()
-
-server_pool_list = []
-
-with open(args.config, 'r') as stream:
-    CONFIG = yaml.load(stream)
 
 # Add proxies to the database
 for pool_rank, pool in enumerate(CONFIG.get('Pools', [])):
     for proxy in pool['Proxies']:
-        # TODO: Add lots of validation to the config inputs
         try:
             with db_conn:
                 db_conn.execute("INSERT INTO proxy (host, username, password, port, types, pool) VALUES (?,?,?,?,?,?)",
@@ -58,10 +44,11 @@ for rule_rank, rule in enumerate(CONFIG['Rules']):
         except sqlite3.IntegrityError:
             logger.critical("Failed to save rules to database")
 
+
+server_pool_list = []
 # Add the server ports
 for port in server_ports:
     server_pool_list.append(Server(CONFIG['Server'].get('Host', '0.0.0.0'), port))
-
 
 # Start api server
 api.start_server(CONFIG['Server'].get('Host', '0.0.0.0'), CONFIG['Server'].get('API_Port', 8181))

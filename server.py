@@ -1,6 +1,7 @@
 import time
 import asyncio
 import logging
+from config import CONFIG
 from proxy import get_proxy
 from errors import (
     BadStatusLine, BadResponseError, ErrorOnStream,
@@ -74,7 +75,7 @@ class Server:
         self._connections[f] = (client_reader, client_writer)
 
     async def _handle(self, client_reader, client_writer):
-        logger.debug('Accepted connection from %s' % (client_writer.get_extra_info('peername'),))
+        logger.debug(f"Accepted connection from {client_writer.get_extra_info('peername')}")
 
         time_of_request = int(time.time())  # The time the request was requested
         request, headers = await self._parse_request(client_reader)
@@ -136,47 +137,48 @@ class Server:
             proxy.log(request.decode(), stime)
             # At this point, the client has already disconnected and now the stats can be processed and saved
             try:
-                proxy_url = f'{proxy.host}:{proxy.port}'
-                path = None
-                # Can get path for http requests, but not for https
-                if '/' in headers.get('Path', ''):
-                    path = '/' + headers.get('Path', '').split('/')[-1]
+                if CONFIG.get('Server', {}).get('Log_Requests', True):
+                    proxy_url = f'{proxy.host}:{proxy.port}'
+                    path = None
+                    # Can get path for http requests, but not for https
+                    if '/' in headers.get('Path', ''):
+                        path = '/' + headers.get('Path', '').split('/')[-1]
 
-                try:
-                    status_code = parse_status_line(stream[1].result().split(b'\r\n', 1)[0].decode()).get('Status')
-                except Exception as e:
-                    logger.warning(f"Issue saving status code: proxy={proxy_url}; host={headers.get('Host')}")
-                    status_code = None
-                    if error is None:
-                        error = repr(e)
+                    try:
+                        status_code = parse_status_line(stream[1].result().split(b'\r\n', 1)[0].decode()).get('Status')
+                    except Exception as e:
+                        logger.warning(f"Issue saving status code: proxy={proxy_url}; host={headers.get('Host')}")
+                        status_code = None
+                        if error is None:
+                            error = repr(e)
 
-                try:
-                    proxy_bandwidth_up = len(stream[0].result()) + proxy.stats.get('bandwidth_up', 0)
-                    proxy_bandwidth_down = len(stream[1].result()) + proxy.stats.get('bandwidth_down', 0)
-                except Exception:
-                    # Happens if something goes wrong with the connection
-                    logger.warning(f"Issue saving bandwidth: proxy={proxy_url}; host={headers.get('Host')}")
-                    proxy_bandwidth_up = None
-                    proxy_bandwidth_down = None
+                    try:
+                        proxy_bandwidth_up = len(stream[0].result()) + proxy.stats.get('bandwidth_up', 0)
+                        proxy_bandwidth_down = len(stream[1].result()) + proxy.stats.get('bandwidth_down', 0)
+                    except Exception:
+                        # Happens if something goes wrong with the connection
+                        logger.warning(f"Issue saving bandwidth: proxy={proxy_url}; host={headers.get('Host')}")
+                        proxy_bandwidth_up = None
+                        proxy_bandwidth_down = None
 
-                with db_conn:
-                    db_conn.execute("""INSERT INTO request
-                                       (proxy, domain, path, scheme, bandwidth_up, bandwidth_down,
-                                        status_code, error, total_time, time_of_request, pool, port)
-                                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-                                       """, (proxy_url,
-                                             headers.get('Host'),
-                                             path,
-                                             scheme,
-                                             proxy_bandwidth_up,
-                                             proxy_bandwidth_down,
-                                             status_code,
-                                             error,
-                                             proxy.stats['total_time'],
-                                             time_of_request,
-                                             pool,
-                                             self.port)
-                                    )
+                    with db_conn:
+                        db_conn.execute("""INSERT INTO request
+                                           (proxy, domain, path, scheme, bandwidth_up, bandwidth_down,
+                                            status_code, error, total_time, time_of_request, pool, port)
+                                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                                           """, (proxy_url,
+                                                 headers.get('Host'),
+                                                 path,
+                                                 scheme,
+                                                 proxy_bandwidth_up,
+                                                 proxy_bandwidth_down,
+                                                 status_code,
+                                                 error,
+                                                 proxy.stats['total_time'],
+                                                 time_of_request,
+                                                 pool,
+                                                 self.port)
+                                        )
 
             except Exception:
                 logger.exception("Failed to save request data")

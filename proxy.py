@@ -92,7 +92,7 @@ class Proxy:
     :raises ValueError: If the host not is IP address, or if the port > 65535
     """
     def __init__(self, host=None, port=None, username=None, password=None, types=(),
-                 timeout=8, verify_ssl=False, geo_alpha2='US'):
+                 timeout=30, verify_ssl=False, geo_alpha2='US'):
         self.host = host
         self.port = int(port) if port is not None else 80
         self._username = username
@@ -161,7 +161,7 @@ class Proxy:
         log_using = log_levels.get(level.upper(), logger.debug)
 
         # Get runtime in ms
-        runtime = int(time.time() * 1000 - stime * 1000) if stime else 0
+        runtime = int((time.time() * 1000) - (stime * 1000)) if stime else 0
         self.stats['total_time'] += runtime
         log_using(f"{self.host}:{self.port} - {msg.strip()} Runtime: {runtime}ms")
 
