@@ -5,31 +5,11 @@ from errors import BadStatusLine
 
 logger = logging.getLogger(__name__)
 
+
 # Used globaly to keep track of the stats for a given pool
 db_conn = None
 db_conn = sqlite3.connect("stats.db", check_same_thread=False)
 db_conn.row_factory = sqlite3.Row
-
-try:
-    # Create the table each time since its in memory.
-    with db_conn:
-        db_conn.execute("""CREATE TABLE IF NOT EXISTS request (
-                               proxy varchar(256),
-                               domain varchar(256),
-                               pool varchar(128),
-                               port integer,
-                               path varchar(512),
-                               scheme varchar(16),
-                               bandwidth_up integer,
-                               bandwidth_down integer,
-                               status_code integer,
-                               error varchar(128),
-                               total_time integer,
-                               time_of_request integer
-                           );
-                        """)
-except sqlite3.IntegrityError:
-    logger.critical("Could not create the in menory `request` table")
 
 try:
     # Create the table each time since its in memory.

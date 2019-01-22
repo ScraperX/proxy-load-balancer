@@ -1,6 +1,9 @@
 import yaml
+import sys
 import logging
 import argparse
+from pythonjsonlogger import jsonlogger
+
 
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -14,3 +17,13 @@ args = parser.parse_args()
 # TODO: Add lots of validation to the config inputs
 with open(args.config, 'r') as stream:
     CONFIG = yaml.load(stream)
+
+
+formatter = jsonlogger.JsonFormatter()
+
+handler = logging.FileHandler('logs/proxy_request.json')
+handler.setFormatter(formatter)
+
+request_logger = logging.getLogger('proxy_request')
+request_logger.setLevel(logging.INFO)
+request_logger.addHandler(handler)
